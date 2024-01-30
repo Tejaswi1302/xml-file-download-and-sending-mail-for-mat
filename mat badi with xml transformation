@@ -1,0 +1,254 @@
+  METHOD if_ex_badi_material_check~check_data.
+*    IF wmara-matnr = 'abc'.   "" this if condition becoz it should not trigger while using "MM01" & "MM02" tCODES.
+*      PARAMETERS p_werks TYPE werks_d.
+    TYPES : BEGIN OF ty_makt,
+              matnr TYPE matnr,
+              spras TYPE spras,
+              maktx TYPE maktx,
+            END OF ty_makt.
+    ""data Declaration
+    DATA: lt_fin      TYPE STANDARD TABLE OF ztr_matbadi INITIAL SIZE 1,
+          w_fin       TYPE ztr_matbadi,
+          wmakt       TYPE ty_makt,
+          lt_mard     TYPE STANDARD TABLE OF mard INITIAL SIZE 1,
+          lt_marc     TYPE STANDARD TABLE OF marc INITIAL SIZE 1,
+          lt_makt     TYPE STANDARD TABLE OF ty_makt INITIAL SIZE 1,
+          lt_mara     TYPE STANDARD TABLE OF mara INITIAL SIZE 1,
+          lt_fin1     TYPE STANDARD TABLE OF ztr_stmatbadi INITIAL SIZE 1,
+          w_fin1      TYPE ztr_stmatbadi,
+          w_pos       TYPE ztr_position,
+          lt_pos      TYPE ztr_ttposition,
+          lt_contents TYPE solix_tab.
+    """ data declaration for xml
+    DATA : ls_xml_out TYPE Xstring,
+           lt_xml_out TYPE TABLE OF xstring,
+           lv_file    TYPE string.
+
+    "" data declration for mail
+    DATA: lv_subject    TYPE so_obj_des,
+          lo_send_mail  TYPE REF TO cl_bcs,
+          lo_recipient  TYPE REF TO if_recipient_bcs,
+          lo_cc         TYPE REF TO os_boolean,
+          lv_email      TYPE adr6-smtp_addr,
+          lv_copy_email TYPE adr6-smtp_addr,
+          lv_bcc_email  TYPE REF TO adr6-smtp_addr.
+
+    ""select the data from mard  matnr,werks,lgort,lgpbe,lvorm
+    "" selected only 5 rows becoz to reduce the no of records to be posted in custom Table
+    SELECT  * UP TO 5 ROWS FROM mard
+              INTO TABLE lt_mard
+             WHERE
+             werks = wmard-werks.
+    IF sy-subrc = 0.
+      SORT lt_mard BY matnr werks lgort.
+    ELSE.
+      MESSAGE 'data not found for given plant' TYPE 'I'.
+      LEAVE  LIST-PROCESSING.
+    ENDIF.
+    IF lt_mard IS NOT INITIAL.
+      ""select the data from marc (matnr, werks,ekgrp,prctr,disgr)
+      SELECT *  FROM marc INTO TABLE @lt_marc
+             FOR ALL ENTRIES IN @LT_mard
+             WHERE werks = @wmard-werks AND
+                  matnr  = @lt_mard-matnr.
+      IF sy-subrc IS NOT INITIAL.
+        MESSAGE 'data not found for given plant' TYPE 'I'.
+        LEAVE  LIST-PROCESSING.
+      ELSE.
+        SORT lt_marc BY matnr werks.
+      ENDIF.
+      "" select the data from mara table(matnr,mtart,meins,matkl,gewei,ntgew,brgew,breit,hoehe,meabm,mfrpn)
+      SELECT *  FROM mara
+             INTO TABLE @lt_mara
+             FOR ALL ENTRIES IN @lt_mard WHERE
+             matnr = @lt_mard-matnr.
+      IF sy-subrc <> 0.
+        MESSAGE 'data not found for given plant' TYPE 'I'.
+        LEAVE  LIST-PROCESSING.
+      ELSE.
+        SORT lt_mara BY matnr.
+      ENDIF.
+      """ Select data from makt table for mat description
+      SELECT matnr,spras,maktx  FROM makt
+        INTO TABLE @lt_makt
+        FOR ALL ENTRIES IN @lt_mard WHERE
+             matnr = @lt_mard-matnr AND
+             spras = 'E'.
+      IF sy-subrc = 0.
+        SORT lt_makt  BY matnr.
+      ELSE.
+        MESSAGE 'data not found for given plant' TYPE 'I'.
+        LEAVE  LIST-PROCESSING.
+      ENDIF.
+    ENDIF.
+
+
+    LOOP AT lt_mard INTO  wmard.
+      READ TABLE lt_marc INTO wmarc WITH KEY matnr = wmard-matnr werks = wmard-werks.
+      IF sy-subrc = 0.
+        READ TABLE lt_mara INTO wmara WITH KEY matnr = wmard-matnr.
+        IF sy-subrc = 0.
+          READ TABLE lt_makt INTO wmakt WITH KEY matnr = wmard-matnr spras = 'E'.
+          IF sy-subrc = 0.
+            w_fin-mandt = '100'.
+            w_fin-yymatnr = wmard-matnr.
+            w_fin-yymtart = wmara-mtart.
+            w_fin-yymeins = wmara-meins.
+            w_fin-yymatkl = wmara-matkl.
+            w_fin-yymaktx = wmakt-maktx.
+            w_fin-yyekgrp = wmarc-ekgrp.
+            w_fin-yygewei = wmara-gewei.
+            w_fin-yyntgew = wmara-ntgew.
+            w_fin-yyhoehe = wmara-hoehe.
+            w_fin-yyBREIT = wmara-breit.
+            w_fin-yybrgew = wmara-brgew.
+            w_fin-yymeabm = wmara-meabm.
+            w_fin-yymfrpn = wmara-mfrpn.
+            w_fin-yywerks = wmarc-werks.
+            w_fin-yydisgr = wmarc-disgr.
+            w_fin-yyprctr = wmarc-prctr.
+            w_fin-yylgort = wmard-lgort.
+            w_fin-yylgpbe = wmard-lgpbe.
+            w_fin-yylvorm = wmard-lvorm.
+            APPEND w_fin TO lt_fin.
+
+            "" filling data to xml structure
+*            w_fin1-mandt = '100'.
+            w_fin1-yymatnr = wmard-matnr.
+            w_fin1-yymtart = wmara-mtart.
+            w_fin1-yymeins = wmara-meins.
+            w_fin1-yymatkl = wmara-matkl.
+            w_fin1-yymaktx = wmakt-maktx.
+            w_fin1-yyekgrp = wmarc-ekgrp.
+            w_fin1-yywerks = wmarc-werks.
+            w_fin1-yylgort = wmard-lgort.
+            w_fin1-yylgpbe = wmard-lgpbe.
+            w_fin1-yylvorm = wmard-lvorm.
+            w_fin1-yybreit = wmara-breit.
+            """fill  postion struc
+*            w_pos-mandt = '100'.
+            w_pos-yygewei = wmara-gewei.
+            w_pos-yyntgew = wmara-ntgew.
+            w_pos-yyhoehe = wmara-hoehe.
+            w_pos-yyBRgew = wmara-brgew.
+            w_pos-yymeabm = wmara-meabm.
+            w_pos-yymfrpn = wmara-mfrpn.
+            w_pos-yydisgr = wmarc-disgr.
+            w_pos-yyprctr = wmarc-prctr.
+            APPEND w_pos TO lt_pos.
+            w_fin1-yyposition = lt_pos.
+            APPEND w_fin1 TO lt_fin1.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
+      CLEAR : w_fin,wmara,wmarc,wmard.
+    ENDLOOP.
+    IF lt_fin1 IS NOT INITIAL.
+      "" call transfromation which is created on TCODE 'XSLT_TOOL'.
+      CALL TRANSFORMATION z_xml_mat1
+       SOURCE mat_details = w_fin1
+       RESULT XML ls_xml_out.
+*    APPEND ls_xml_out TO lt_xml_out.
+    ENDIF.
+
+
+    """"  inserting data to custom Table
+
+    IF lt_fin IS NOT INITIAL.
+      INSERT ztr_matbadi FROM TABLE lt_fin.
+      IF sy-subrc <> 0.
+        MESSAGE 'data not inserted' TYPE 'E'.
+      ENDIF.
+    ENDIF.
+
+    """ path for xml file to get downloaded
+*
+    CONCATENATE 'D:\OneDrive - Percipere\Desktop\output' sy-uzeit '.xml' INTO lv_file.
+
+
+    "" converting xml to solix
+    lt_contents = cl_bcs_convert=>xstring_to_solix( ls_xml_out ).
+
+
+
+    ""  Download XML file to local file system
+    CALL METHOD cl_gui_frontend_services=>gui_download
+      EXPORTING
+        bin_filesize = xstrlen( ls_xml_out )
+        filename     = lv_file
+        filetype     = 'BIN'
+      CHANGING
+        data_tab     = lt_contents
+      EXCEPTIONS
+        OTHERS       = 24.
+
+    """" Create instance of the email class
+    lo_send_mail = cl_bcs=>create_persistent( ).
+
+* -------- create and set document with attachment ---------------
+
+    """"""" create document (subject) from internal table with text
+    lv_subject = 'Material Details'.
+    DATA(document) = cl_document_bcs=>create_document(
+    i_type = 'HTM'
+*        i_text = ''
+    i_length = '20'
+    i_subject = lv_subject
+    ).
+
+* add attachment to document
+
+* BCS expects document content here e.g. from document upload
+
+*        TRY.
+    CALL METHOD document->add_attachment
+      EXPORTING
+        i_attachment_type    = 'XML'
+        i_attachment_subject = 'My xml mat attachment'
+        i_att_content_hex    = lt_contents
+*       i_attachment_size    = len.
+      .
+*          CATCH cx_document_bcs INTO DATA(lx_document_bcs).
+*        ENDTRY.
+*assign document and all its details to mail
+    lo_send_mail->set_document( document ).
+
+*        sender = cl_sapuser_bcs=>create( sy-uname ).
+*
+*        CALL METHOD lo_send_mail->set_sender
+*          EXPORTING
+*            i_sender = sender.
+    lv_email = 'tejaswi.rajulapati@percipere.co'.
+    lv_copy_email = 'test@abc.com'.
+    lo_recipient = cl_cam_address_bcs=>create_internet_address( lv_email ).
+
+*        lo_cc = cl_cam_address_bcs=>create_internet_address( lv_copy_email ).
+*        lo_bcc = cl_cam_address_bcs=>create_internet_address(lv_email_bcc).
+
+*        TRY.
+    lo_send_mail->add_recipient(
+    EXPORTING
+      i_recipient = lo_recipient
+*          i_copy = lo_cc
+*          i_blind_copy = lo_bcc
+      i_express = 'X'
+    ).
+*        ENDTRY.
+*        TRY.
+
+    lo_send_mail->send(
+    EXPORTING
+  i_with_error_screen = 'X' ).
+    COMMIT WORK.
+    IF sy-subrc = 0. "MAIL SENT SUCCESSFULLY
+      WRITE :/ 'MAIL SENT SUCCESSFULLY'.
+    ENDIF.
+
+*        ENDTRY.
+***    """For xml o display in browser for single record
+    cl_abap_browser=>show_xml( xml_xstring = ls_xml_out ) .
+
+
+*  ENDIF.
+ENDMETHOD.
